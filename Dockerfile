@@ -8,4 +8,4 @@ RUN apt-get install ffmpeg
 RUN apt-get update
 RUN apt-get install -y libssl-dev aria2 ffmpeg curl unzip
 COPY . .
-CMD ["python3", "main.py"]
+CMD gunicorn app:app & python3 main.py

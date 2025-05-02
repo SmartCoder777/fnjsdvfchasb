@@ -26,7 +26,7 @@ bot = Client(
     "bot",
     api_id=29754529,
     api_hash="dd54732e78650479ac4fb0e173fe4759",
-    bot_token="7322215045:AAHY7QWwMZ1sMckA32f3kqJImkLos16htBI")
+    bot_token="7832446869:AAHZGuV2o7xLr_EpffrXk5BMwppCwvFq-pY")
 
 @bot.on_message(filters.command(["stop"]))
 async def cancel_command(bot: Client, m: Message):
@@ -207,8 +207,8 @@ async def account_login(bot: Client, m: Message):
                 cmd = f'yt-dlp -f "{ytf}" "{url}" -o "{name}.mp4"'
 
             try:                               
-                cc = f'** {str(count).zfill(3)}.** {name1}\n**Batch Name :** {b_name}\n\n**Downloaded by : {CR}**'
-                cc1 = f'** {str(count).zfill(3)}.** {name1}\n**Batch Name :**{b_name}\n\n**Downloaded by : {CR}**'
+                cc = f'** {str(count).zfill(3)}.** {name1}\n\n**Batch Name :** {b_name}\n\n**Downloaded by : {CR}**'
+                cc1 = f'** {str(count).zfill(3)}.** {name1}\n\n**Batch Name :**{b_name}\n\n**Downloaded by : {CR}**'
                 if "drive" in url:
                     try:
                         ka = await helper.download(url, name)

@@ -89,33 +89,52 @@ async def account_login(bot: Client, m: Message):
 
     links = [line.split('://',1) for line in content]
     await editable.edit(f"Total links found are **{len(links)}**\n\nSend From where you want to download initial is **1**")
+    # listen for start index, ignore any commands
     resp1: Message = await bot.listen(editable.chat.id)
+    while resp1.text.startswith('/') or not resp1.text.isdigit():
+        await resp1.delete(True)
+        resp1 = await bot.listen(editable.chat.id)
     start_index = int(resp1.text)
     await resp1.delete(True)
 
     await editable.edit("**Enter Batch Name or send d for grabbing from text filename.**")
     resp2: Message = await bot.listen(editable.chat.id)
+    while resp2.text.startswith('/'):
+        await resp2.delete(True)
+        resp2 = await bot.listen(editable.chat.id)
     b_name = resp2.text if resp2.text != 'd' else None
     await resp2.delete(True)
 
     await editable.edit("**Enter resolution**")
     resp3: Message = await bot.listen(editable.chat.id)
+    while resp3.text.startswith('/'):
+        await resp3.delete(True)
+        resp3 = await bot.listen(editable.chat.id)
     req_res = resp3.text; await resp3.delete(True)
     res_map = {"144":"256x144","240":"426x240","360":"640x360","480":"854x480","720":"1280x720","1080":"1920x1080"}
     res = res_map.get(req_res, "UN")
 
     await editable.edit("**Enter Your Name or send `de` for default**")
     resp4: Message = await bot.listen(editable.chat.id)
+    while resp4.text.startswith('/'):
+        await resp4.delete(True)
+        resp4 = await bot.listen(editable.chat.id)
     credit = f"[{m.from_user.first_name}](tg://user?id={m.from_user.id})"
     CR = credit if resp4.text == 'de' else resp4.text
     await resp4.delete(True)
 
     await editable.edit("**Enter PW Token or send No**")
     resp5: Message = await bot.listen(editable.chat.id)
+    while resp5.text.startswith('/'):
+        await resp5.delete(True)
+        resp5 = await bot.listen(editable.chat.id)
     pw_token = resp5.text; await resp5.delete(True)
 
     await editable.edit("Send Thumb URL or No")
     resp6: Message = await bot.listen(editable.chat.id)
+    while resp6.text.startswith('/'):
+        await resp6.delete(True)
+        resp6 = await bot.listen(editable.chat.id)
     thumb = resp6.text
     await resp6.delete(True); await editable.delete()
     if thumb.startswith("http"): os.system(f"wget '{thumb}' -O thumb.jpg"); thumb = "thumb.jpg"

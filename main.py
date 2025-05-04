@@ -20,7 +20,7 @@ bot = Client(
     "bot",
     api_id=29754529,
     api_hash="dd54732e78650479ac4fb0e173fe4759",
-    bot_token="7892640909:AAEGpCR3UOx4kBIkHGv7RE2VmkQFr39t5Vw"
+    bot_token="7719885018:AAEHHG6-cby4xjYb2t71_vb8Rt5zInTKvNM"
 )
 
 # -- Added function for tokenized vidrize links --

@@ -23,15 +23,19 @@ bot = Client(
     bot_token="7719885018:AAEHHG6-cby4xjYb2t71_vb8Rt5zInTKvNM"
 )
 
-# -- Added function for tokenized vidrize links --
+# -- Added function for tokenized vidrize links (with cid header) --
 async def download_tokenized_video(url: str, output_name: str, user_agent: str = None) -> str:
     """
-    Download a tokenized non-DRM video URL using yt-dlp by extracting `curl` as Referer and `tkn` as Bearer token.
+    Download a tokenized non-DRM video URL using yt-dlp by extracting:
+      - `curl` as Referer header
+      - `tkn` as Authorization Bearer token
+      - `cid` as custom header
     """
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
     referer = qs.get('curl', [''])[0]
     token = qs.get('tkn', [''])[0]
+    cid = qs.get('cid', [''])[0]
 
     if user_agent is None:
         user_agent = (
@@ -40,12 +44,15 @@ async def download_tokenized_video(url: str, output_name: str, user_agent: str =
             'Chrome/113.0.0.0 Safari/537.36'
         )
 
+    # assemble headers for yt-dlp
     headers = [
         '--add-header', f"Referer: {referer}",
         '--add-header', f"User-Agent: {user_agent}",
     ]
     if token:
         headers += ['--add-header', f"Authorization: Bearer {token}"]
+    if cid:
+        headers += ['--add-header', f"cid: {cid}"]
 
     cmd = [
         'yt-dlp',

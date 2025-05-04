@@ -1,12 +1,30 @@
-
 FROM python:3.10.14-bookworm
-COPY requirements.txt requirements.txt
-RUN pip install --upgrade pip
-RUN apt-get update && apt-get install -y poppler-utils
-RUN apt -qq update && apt -qq install -y git wget pv jq python3-dev ffmpeg mediainfo
-RUN pip3 install -r requirements.txt
-RUN apt-get install ffmpeg
-RUN apt-get update
-RUN apt-get install -y libssl-dev aria2 ffmpeg curl unzip
+
+# Install all OS-level dependencies in one go
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      git \
+      wget \
+      pv \
+      jq \
+      python3-dev \
+      libssl-dev \
+      poppler-utils \
+      mediainfo \
+      aria2 \
+      ffmpeg \
+      curl \
+      unzip && \
+    rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip and install Python deps
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+# Copy your application code and ensure downloads folder exists
 COPY . .
+RUN mkdir -p downloads
+
+# Keep your original CMD exactly as is
 CMD gunicorn app:app & python3 main.py

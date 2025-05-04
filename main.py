@@ -1,235 +1,324 @@
-from urllib.parse import urlparse, parse_qs
-import subprocess
+from pyrogram.errors.exceptions.bad_request_400 import StickerEmojiInvalid
 import requests
 import json
+import subprocess
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from pyrogram.types.messages_and_media import message
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.errors import FloodWait
 from pyromod import listen
+from pyrogram.types import Message
+from p_bar import progress_bar
+from subprocess import getstatusoutput
 from aiohttp import ClientSession
 import helper
 from logger import logging
 import time
 import asyncio
+from pyrogram.types import User, Message
+from config import api_id, api_hash, bot_token, auth_users, sudo_users
 import sys
 import re
 import os
-from config import api_id, api_hash, bot_token, auth_users, sudo_users
+from playwright.sync_api import sync_playwright
 
 bot = Client(
     "bot",
-    api_id=29754529,
-    api_hash="dd54732e78650479ac4fb0e173fe4759",
-    bot_token="7719885018:AAEHHG6-cby4xjYb2t71_vb8Rt5zInTKvNM"
+    api_id=api_id,
+    api_hash=api_hash,
+    bot_token=bot_token
 )
 
-# -- Enhanced function: pre-fetch JSON and extract m3u8 before running yt-dlp --
-async def download_tokenized_video(url: str, output_name: str, user_agent: str = None) -> str:
-    """
-    Download a tokenized non-DRM video URL by:
-      1. Extracting `curl`, `tkn`, `cid`, `v`, and `vat` from query.
-      2. Registering the lesson via VAT.
-      3. Fetching the player-data to grab the .m3u8 HLS URL.
-      4. Swapping to the 720p stream and feeding that URL to yt-dlp with proper headers.
-    """
-    logging.info(f"Starting download for {url} as {output_name}")
-    parsed = urlparse(url)
-    qs = parse_qs(parsed.query)
-    referer = qs.get('curl', [''])[0]
-    token = qs.get('tkn', [''])[0]
-    cid = qs.get('cid', [''])[0]
-    video_id = qs.get('v', [''])[0]
-    vat = qs.get('vat', [''])[0]
-
-    if user_agent is None:
-        user_agent = (
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-            'AppleWebKit/537.36 (KHTML, like Gecko) '
-            'Chrome/113.0.0.0 Safari/537.36'
-        )
-
-    headers = {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'Origin': 'https://player.filecdn.in',
-        'Referer': referer,
-        'User-Agent': user_agent,
-        'token': token
-    }
-    if cid:
-        headers['cid'] = cid
-
-    download_url = url
-    try:
-        # Step 1: register/view the lesson via VAT
-        lesson_url = f"https://web.vijethaiasacademy.com/api/course-creator/userlesson/by-vat?createIfNotFound=true&vat={vat}"
-        logging.debug(f"Registering lesson via {lesson_url}")
-        requests.get(lesson_url, headers=headers, timeout=10)
-        # Step 2: fetch player-data
-        player_url = f"https://web.vijethaiasacademy.com/api/vidrize/player-data/{video_id}?u=true&vat={vat}"
-        logging.debug(f"Fetching player data from {player_url}")
-        res = requests.get(player_url, headers=headers, timeout=10)
-        data = res.json()
-        # extract HLS URL
-        if 'signedVideo' in data and 'hlsUrl' in data['signedVideo']:
-            m3u8 = data['signedVideo']['hlsUrl']
-        elif 'params' in data and 'hlsUrl' in data['params']:
-            m3u8 = data['params']['hlsUrl']
-        else:
-            m = re.search(r"(https?://[^'\"<>]+?\.m3u8[^'\"<>]*)", res.text)
-            m3u8 = m.group(1) if m else None
-        if m3u8:
-            download_url = m3u8.replace('playlist.m3u8', '720p/video.m3u8')
-            logging.info(f"Resolved HLS URL to {download_url}")
-    except Exception as e:
-        logging.error(f"Error fetching tokenized video info: {e}")
-
-    # prepare yt-dlp command
-    ytdlp_headers = []
-    for k, v in headers.items():
-        ytdlp_headers += ['--add-header', f"{k}: {v}"]
-
-    cmd = [
-        'yt-dlp',
-        download_url,
-        '-o', f"{output_name}.mp4",
-    ] + ytdlp_headers
-    logging.debug(f"Running command: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        logging.error(f"yt-dlp failed: {result.stderr}")
-        raise RuntimeError(f"yt-dlp failed: {result.stderr}")
-    logging.info(f"Download completed: {output_name}.mp4")
-    return f"{output_name}.mp4"
-# -- End enhanced function --
-
-# -- /token command handler for batch tokenized downloads --
-@bot.on_message(filters.command(["token"]))
-async def token_download(bot: Client, m: Message):
-    user_id = m.from_user.id if m.from_user else None
-    logging.info(f"User {user_id} invoked /token")
-    if user_id not in auth_users and user_id not in sudo_users:
-        logging.warning(f"Unauthorized user {user_id}")
-        await m.reply("**You Are Not Subscribed To This Bot\nContact - @VictoryAnthem**", quote=True)
-        return
-
-    prompt = await m.reply_text("**Send text file or paste links (one per line) for tokenized downloads**")
-    inp: Message = await bot.listen(prompt.chat.id)
-    if inp.document:
-        path = await inp.download()
-        with open(path) as f:
-            lines = f.read().splitlines()
-        os.remove(path)
-        logging.debug(f"Read {len(lines)} links from document")
-    else:
-        lines = inp.text.splitlines()
-        logging.debug(f"Read {len(lines)} links from text")
-    await prompt.delete(True)
-
-    links = [line.split('://',1)[1] if '://' in line else line for line in lines]
-    ask = await m.reply_text(f"Total links: **{len(links)}**\nSend starting line number (default 1)")
-    resp: Message = await bot.listen(ask.chat.id)
-    while resp.text.startswith('/') or not resp.text.isdigit():
-        await resp.delete(True)
-        resp = await bot.listen(ask.chat.id)
-    start = int(resp.text); await resp.delete(True)
-    logging.debug(f"Download starting at index {start}")
-
-    ask2 = await m.reply_text("**Enter Batch Name or send `d` for default**")
-    resp2: Message = await bot.listen(ask2.chat.id)
-    while resp2.text.startswith('/'):
-        await resp2.delete(True)
-        resp2 = await bot.listen(ask2.chat.id)
-    batch = None if resp2.text == 'd' else resp2.text
-    await resp2.delete(True)
-
-    ask3 = await m.reply_text("**Enter 'de' to use your name or type custom 'Downloaded by'**")
-    resp3: Message = await bot.listen(ask3.chat.id)
-    while resp3.text.startswith('/'):
-        await resp3.delete(True)
-        resp3 = await bot.listen(ask3.chat.id)
-    downloader = resp3.text if resp3.text != 'de' else f"[{m.from_user.first_name}](tg://user?id={m.from_user.id})"
-    await resp3.delete(True)
-    logging.debug(f"Batch name: {batch}, downloader: {downloader}")
-
-    count = start
-    for raw in links[start-1:]:
-        url = 'https://' + raw
-        name_base = re.sub(r"[^\w\-]", "", raw)[:60]
-        out = f"{str(count).zfill(3)}) {name_base}"
-        logging.info(f"Processing link {count}: {url}")
-        try:
-            file_path = await download_tokenized_video(url, out)
-            caption = f"**{count}.** {name_base}\n**Batch:** {batch or name_base}\n**By:** {downloader}"
-            await bot.send_document(chat_id=m.chat.id, document=file_path, caption=caption)
-            os.remove(file_path)
-            logging.info(f"Sent file {file_path}")
-            count += 1
-        except Exception as e:
-            logging.error(f"Failed to download {url}: {e}")
-            await m.reply_text(f"Failed to download {url}: {e}")
-            count += 1
-
-    logging.info("Token downloads completed")
-    await m.reply_text("🔰 Token downloads completed 🔰")
-# -- End /token handler --
-
-# -- Existing /start and /stop flows remain unchanged --
 @bot.on_message(filters.command(["stop"]))
 async def cancel_command(bot: Client, m: Message):
-    user_id = m.from_user.id if m.from_user else None
-    logging.info(f"User {user_id} invoked /stop")
+    user_id = m.from_user.id if m.from_user is not None else None
     if user_id not in auth_users and user_id not in sudo_users:
-        logging.warning(f"Unauthorized user {user_id} attempted /stop")
-        await m.reply("**You Are Not Subscribed To This Bot\nContact - @VictoryAnthem**", quote=True)
+        await m.reply(f"**You Are Not Subscribed To This Bot\nContact - @VictoryAnthem**", quote=True)
         return
-    logging.info("Stopping bot and restarting process")
     await m.reply_text("**STOPPED**🛑🛑", True)
     os.execl(sys.executable, sys.executable, *sys.argv)
 
 @bot.on_message(filters.command(["start"]))
 async def account_login(bot: Client, m: Message):
-    user_id = m.from_user.id if m.from_user else None
-    logging.info(f"User {user_id} invoked /start")
+    user_id = m.from_user.id if m.from_user is not None else None
     if user_id not in auth_users and user_id not in sudo_users:
-        logging.warning(f"Unauthorized user {user_id} attempted /start")
-        await m.reply("**You Are Not Subscribed To This Bot\nContact - @VictoryAnthem**", quote=True)
+        await m.reply(f"**You Are Not Subscribed To This Bot\nContact - @VictoryAnthem**", quote=True)
         return
 
-    editable = await m.reply_text(f"**Hey [{m.from_user.first_name}](tg://user?id={m.from_user.id})\nSend txt file**")
+    editable = await m.reply_text(
+        f"**Hey [{m.from_user.first_name}](tg://user?id={m.from_user.id})\nSend txt file**"
+    )
     input_msg: Message = await bot.listen(editable.chat.id)
     if input_msg.document:
-        path = await input_msg.download()
+        x = await input_msg.download()
         await input_msg.delete(True)
-        with open(path) as f:
-            content = f.read().splitlines()
-        os.remove(path)
-        logging.debug(f"Read start links file with {len(content)} entries")
+        file_name, ext = os.path.splitext(os.path.basename(x))
+        credit = f"[{m.from_user.first_name}](tg://user?id={m.from_user.id})"
+        try:
+            with open(x, "r") as f:
+                content = f.read().split("\n")
+            links = [line.split('://', 1) for line in content if line]
+            os.remove(x)
+        except:
+            await m.reply_text("Invalid file input.🥲")
+            os.remove(x)
+            return
     else:
-        content = input_msg.text.splitlines()
-        logging.debug(f"Read start links text with {len(content)} entries")
+        content = input_msg.text.split("\n")
+        links = [line.split('://', 1) for line in content if line]
 
-    links = [line.split('://',1) for line in content]
-    await editable.edit(f"Total links found are **{len(links)}**\n\nSend From where you want to download initial is **1**")
-    resp1: Message = await bot.listen(editable.chat.id)
-    while resp1.text.startswith('/') or not resp1.text.isdigit():
-        await resp1.delete(True)
-        resp1 = await bot.listen(editable.chat.id)
-    start_index = int(resp1.text)
-    await resp1.delete(True)
-    logging.debug(f"Start index for visionias flow: {start_index}")
+    await editable.edit(
+        f"Total links found are **{len(links)}**\n\nSend From where you want to download initial is **1**"
+    )
+    input0: Message = await bot.listen(editable.chat.id)
+    raw_text = input0.text
+    await input0.delete(True)
 
     await editable.edit("**Enter Batch Name or send d for grabbing from text filename.**")
-    resp2: Message = await bot.listen(editable.chat.id)
-    while resp2.text.startswith('/'):
-        await resp2.delete(True)
-        resp2 = await bot.listen(editable.chat.id)
-    b_name = resp2.text if resp2.text != 'd' else None
-    await resp2.delete(True)
-    logging.debug(f"VisionIAS batch name: {b_name}")
+    input1: Message = await bot.listen(editable.chat.id)
+    raw_text0 = input1.text
+    await input1.delete(True)
+    b_name = file_name if raw_text0 == 'd' else raw_text0
 
-    # ... rest of /start logic remains unchanged
+    await editable.edit("**Enter resolution**")
+    input2: Message = await bot.listen(editable.chat.id)
+    raw_text2 = input2.text
+    await input2.delete(True)
+    res_map = {
+        "144": "256x144",
+        "240": "426x240",
+        "360": "640x360",
+        "480": "854x480",
+        "720": "1280x720",
+        "1080": "1920x1080"
+    }
+    res = res_map.get(raw_text2, "UN")
 
-    await m.reply_text("🔰Done Boss🔰")
+    await editable.edit("**Enter Your Name or send `de` for use default**")
+    input3: Message = await bot.listen(editable.chat.id)
+    raw_text3 = input3.text
+    await input3.delete(True)
+    CR = credit if raw_text3 == 'de' else raw_text3
+
+    await editable.edit("**Enter Your PW Working Token\n\nOtherwise Send No**")
+    input4: Message = await bot.listen(editable.chat.id)
+    pw_token = input4.text
+    await input4.delete(True)
+
+    await editable.edit(
+        "Now send the **Thumb url**\nEg : ```https://telegra.ph/file/0633f8b6a6f110d34f044.jpg```\n\nor Send No"
+    )
+    input6: Message = await bot.listen(editable.chat.id)
+    await input6.delete(True)
+    await editable.delete()
+
+    thumb = input6.text
+    if thumb.startswith("http://") or thumb.startswith("https://"):
+        getstatusoutput(f"wget '{thumb}' -O 'thumb.jpg'")
+        thumb = "thumb.jpg"
+    else:
+        thumb = None
+
+    count = int(raw_text) if len(links) > 1 else 1
+
+    try:
+        for i in range(count - 1, len(links)):
+            V = links[i][1].replace(
+                "file/d/", "uc?export=download&id="
+            ).replace(
+                "www.youtube-nocookie.com/embed", "youtu.be"
+            ).replace(
+                "?modestbranding=1", ""
+            ).replace(
+                "/view?usp=sharing", ""
+            )
+            url = "https://" + V
+
+            if "visionias" in url:
+                async with ClientSession() as session:
+                    async with session.get(
+                        url,
+                        headers={
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
+                            'User-Agent': 'Mozilla/5.0'
+                        }
+                    ) as resp:
+                        text = await resp.text()
+                        url = re.search(r"(https://.*?playlist.m3u8.*?)\"", text).group(1)
+
+            elif any(x in url for x in [
+                'classplusapp', 'testbook.com', 'drm'
+            ]):
+                headers = {
+                    'host': 'api.classplusapp.com',
+                    'x-access-token': '...'
+                }
+                url = url.replace(
+                    'https://tencdn.classplusapp.com/',
+                    'https://media-cdn.classplusapp.com/tencent/'
+                )
+                res = requests.get(
+                    "https://api.classplusapp.com/cams/uploader/video/jw-signed-url",
+                    params={"url": url},
+                    headers=headers
+                ).json()
+                url = res.get('drmUrls', {}).get('manifestUrl', res.get('url'))
+
+            elif any(x in url for x in ["d1d34p8vz63oiq", "sec1.pw.live"]):
+                url = f"https://anonymouspwplayer-b99f57957198.herokuapp.com/pw?url={url}?token={pw_token}"
+
+            name1 = re.sub(r"[\t:/+#|@*.]|https?", "", links[i][0])
+            name = f"{str(count).zfill(3)}) {name1[:60]}"
+
+            ytf = (
+                f"b[height<={raw_text2}][ext=mp4]/bv[height<={raw_text2}][ext=mp4]+ba[ext=m4a]/b[ext=mp4]"
+                if "youtu" in url else
+                f"b[height<={raw_text2}]/bv[height<={raw_text2}]+ba/b/bv+ba"
+            )
+
+            cmd = (
+                f'yt-dlp -o "{name}.mp4" "{url}"'
+                if "jw-prod" in url else
+                f'yt-dlp -f "{ytf}" "{url}" -o "{name}.mp4"'
+            )
+
+            try:
+                cc = f"**{str(count).zfill(3)}.** {name1}\n\n**Batch Name :** {b_name}\n\n**Downloaded by : {CR}**"
+                if "drive" in url:
+                    ka = await helper.download(url, name)
+                    await bot.send_document(
+                        chat_id=m.chat.id,
+                        document=ka,
+                        caption=cc
+                    )
+                    os.remove(ka)
+                elif url.endswith(".pdf"):
+                    os.system(cmd)
+                    pdf_name = f"{name}.pdf"
+                    await bot.send_document(
+                        chat_id=m.chat.id,
+                        document=pdf_name,
+                        caption=cc
+                    )
+                    os.remove(pdf_name)
+                else:
+                    prog = await bot.send_message(
+                        m.chat.id,
+                        f"**Downloading:-**\n**Name:** {name}\n**Quality:** {raw_text2}\n" +
+                        f"**Link:** {url}"
+                    )
+                    res_file = await helper.download_video(url, cmd, name)
+                    await prog.delete(True)
+                    await helper.send_vid(bot, m, cc, res_file, thumb, name)
+                    os.remove(res_file)
+                count += 1
+            except FloodWait as e:
+                await m.reply_text(str(e))
+                time.sleep(e.x)
+                count += 1
+            except Exception as e:
+                await m.reply_text(
+                    f"**This #Failed File is not Counted**\n**Name** `{name}`\n**Link** `{url}`\n**Reason:** {e}"
+                )
+                count += 1
+                continue
+    except Exception as e:
+        await bot.send_message(m.chat.id, str(e))
+    await bot.send_message(m.chat.id, "🔰Done Boss🔰")
+
+# /token command implementation\@@bot.on_message(filters.command(["token"]))
+async def token_handler(bot: Client, m: Message):
+    user_id = m.from_user.id if m.from_user else None
+    if user_id not in auth_users and user_id not in sudo_users:
+        return await m.reply("**Unauthorized**", quote=True)
+
+    prompt = await m.reply_text(
+        "📥 Send txt file or paste lines (title: URL with m3u8):"
+    )
+    inp: Message = await bot.listen(prompt.chat.id)
+    lines = []
+    if inp.document:
+        fp = await inp.download()
+        with open(fp, 'r', encoding='utf-8') as f:
+            lines = [l.strip() for l in f if l.strip()]
+        os.remove(fp)
+    else:
+        lines = [l.strip() for l in inp.text.split("\n") if l.strip()]
+    await prompt.delete(True)
+    await inp.delete(True)
+
+    entries = []
+    for line in lines:
+        if ":" in line and "http" in line:
+            title, url = line.split(":", 1)
+            entries.append((title.strip(), url.strip()))
+        else:
+            entries.append((None, line))
+
+    count = 1
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        for title, url in entries:
+            note = await m.reply_text(f"🔍 Processing #{count}: {url}")
+            vat_token = None
+            def handle_request(request):
+                nonlocal vat_token
+                if "by-vat" in request.url and "vat=" in request.url:
+                    vat_token = request.url.split("vat=")[-1].split("&")[0]
+            page = browser.new_page()
+            page.on("request", handle_request)
+            try:
+                page.goto(url, timeout=60000)
+                for _ in range(30):
+                    if vat_token:
+                        break
+                    time.sleep(1)
+            except:
+                await note.edit(f"❌ Failed to load: {url}")
+                page.close()
+                count += 1
+                continue
+            page.close()
+            if not vat_token:
+                await note.edit("❌ VAT not found.")
+                count += 1
+                continue
+
+            vid_match = re.search(r"v=([a-fA-F0-9]+)", url)
+            if not vid_match:
+                await note.edit("❌ Video ID not found.")
+                count += 1
+                continue
+            video_id = vid_match.group(1)
+
+            player_url = f"https://web.vijethaiasacademy.com/api/vidrize/player-data/{video_id}?u=true&vat={vat_token}"
+            try:
+                r2 = requests.get(player_url, headers=HEADERS)
+                data = r2.json()
+                m3u8_url = data.get('signedVideo', {}).get('hlsUrl') or data.get('params', {}).get('hlsUrl')
+                if not m3u8_url:
+                    raise ValueError("m3u8 not found")
+            except Exception as e:
+                await note.edit(f"❌ Player fetch error: {e}")
+                count += 1
+                continue
+
+            base_url = m3u8_url.split("/playlist.m3u8")[0]
+            final_url = f"{base_url}/720p/video.m3u8"
+            name = f"token_{str(count).zfill(3)}"
+            cmd = f'yt-dlp -f best -o "{name}.mp4" "{final_url}"'
+
+            try:
+                await note.edit(f"🔄 Downloading #{count}")
+                res_file = await helper.download_video(final_url, cmd, name)
+                await note.delete(True)
+                await helper.send_vid(bot, m, f"**Downloaded token stream #{count}**", res_file, None, name)
+                os.remove(res_file)
+            except Exception as e:
+                await m.reply_text(f"❌ Download failed #{count}: {e}")
+            count += 1
+        browser.close()
+
+    await m.reply_text("✅ Token downloads complete!")
 
 bot.run()

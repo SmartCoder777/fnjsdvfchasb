@@ -215,13 +215,13 @@ def run_ffmpeg_decrypt(input_url: str, key: str, output_path: str):
     subprocess.run([
         "ffmpeg",
         "-allowed_extensions", "ALL",
-        "-protocol_whitelist", "file,http,https,tcp,tls",
+        "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
         "-i", input_url,
         "-decryption_key", key,
         "-c", "copy",
         output_path
     ], check=True)
-
+    
 @bot.on_message(filters.command(["graphy"]))
 async def graphy_handler(bot: Client, m: Message):
     user_id = m.from_user.id if m.from_user else None

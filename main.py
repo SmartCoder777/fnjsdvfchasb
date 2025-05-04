@@ -27,16 +27,18 @@ bot = Client(
 async def download_tokenized_video(url: str, output_name: str, user_agent: str = None) -> str:
     """
     Download a tokenized non-DRM video URL by:
-      1. Extracting `curl`, `tkn`, `cid` from query.
-      2. Performing a GET to grab the embedded JSON or .m3u8 playlist URL.
-      3. Feeding that playlist URL (or original) to yt-dlp with proper headers.
-    This handles one-time tokened m3u8 by parsing the JSON payload returned by the player.
+      1. Extracting `curl`, `tkn`, `cid`, `v`, and `vat` from query.
+      2. Registering the lesson via VAT.
+      3. Fetching the player-data to grab the .m3u8 HLS URL.
+      4. Swapping to the 720p stream and feeding that URL to yt-dlp with proper headers.
     """
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
     referer = qs.get('curl', [''])[0]
     token = qs.get('tkn', [''])[0]
     cid = qs.get('cid', [''])[0]
+    video_id = qs.get('v', [''])[0]
+    vat = qs.get('vat', [''])[0]
 
     if user_agent is None:
         user_agent = (
@@ -45,42 +47,44 @@ async def download_tokenized_video(url: str, output_name: str, user_agent: str =
             'Chrome/113.0.0.0 Safari/537.36'
         )
 
-    # build headers for request and for yt-dlp
-    req_headers = {
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Origin': 'https://player.filecdn.in',
         'Referer': referer,
-        'User-Agent': user_agent
+        'User-Agent': user_agent,
+        'token': token
     }
-    if token:
-        req_headers['Authorization'] = f"Bearer {token}"
     if cid:
-        req_headers['cid'] = cid
+        headers['cid'] = cid
 
-    # hit the player URL: it returns JSON with the actual m3u8
     download_url = url
     try:
-        resp = requests.get(url, headers=req_headers, timeout=10)
-        data = resp.json()
-        # JW/vidrize style: playlist → sources
-        if 'playlist' in data and data['playlist']:
-            srcs = data['playlist'][0].get('sources', [])
-            for s in srcs:
-                if s.get('file', '').endswith('.m3u8'):
-                    download_url = s['file']
-                    break
+        # Step 1: register/view the lesson via VAT
+        lesson_url = f"https://web.vijethaiasacademy.com/api/course-creator/userlesson/by-vat?createIfNotFound=true&vat={vat}"
+        requests.get(lesson_url, headers=headers, timeout=10)
+        # Step 2: fetch player-data
+        player_url = f"https://web.vijethaiasacademy.com/api/vidrize/player-data/{video_id}?u=true&vat={vat}"
+        res = requests.get(player_url, headers=headers, timeout=10)
+        data = res.json()
+        # extract HLS URL
+        if 'signedVideo' in data and 'hlsUrl' in data['signedVideo']:
+            m3u8 = data['signedVideo']['hlsUrl']
+        elif 'params' in data and 'hlsUrl' in data['params']:
+            m3u8 = data['params']['hlsUrl']
         else:
-            # fallback regex search in HTML/text
-            m = re.search(r"(https?://[^'\"<>]+?\.m3u8[^'\"<>]*)", resp.text)
-            if m:
-                download_url = m.group(1)
+            m = re.search(r"(https?://[^'\"<>]+?\.m3u8[^'\"<>]*)", res.text)
+            m3u8 = m.group(1) if m else None
+        if m3u8:
+            download_url = m3u8.replace('playlist.m3u8', '720p/video.m3u8')
     except Exception:
-        download_url = url
+        pass
 
-    # prepare yt-dlp headers flags
+    # prepare yt-dlp command
     ytdlp_headers = []
-    for k, v in req_headers.items():
+    for k, v in headers.items():
         ytdlp_headers += ['--add-header', f"{k}: {v}"]
 
-    # run yt-dlp on the extracted URL
     cmd = [
         'yt-dlp',
         download_url,
@@ -202,7 +206,7 @@ async def account_login(bot: Client, m: Message):
     await editable.edit("**Enter resolution**")
     resp3: Message = await bot.listen(editable.chat.id)
     while resp3.text.startswith('/') or not resp3.text.isdigit():
-        await resp3.delete(True)
+        awaitresp3.delete(True)
         resp3 = await bot.listen(editable.chat.id)
     req_res = resp3.text; await resp3.delete(True)
     res_map = {"144":"256x144","240":"426x240","360":"640x360","480":"854x480","720":"1280x720","1080":"1920x1080"}

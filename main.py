@@ -211,54 +211,86 @@ async def single_token(bot: Client, m: Message):
     ...  # unchanged  
 
 # New /graphy handler appended below  
-async def run_ffmpeg_decrypt(input_url: str, key: str, output_path: str):  
-    subprocess.run([  
-        "ffmpeg",  
-        "-allowed_extensions", "ALL",  
-        "-protocol_whitelist", "file,http,https,tcp,tls",  
-        "-i", input_url,  
-        "-decryption_key", key,  
-        "-c", "copy",  
-        output_path  
-    ], check=True)  
+def run_ffmpeg_decrypt(input_url: str, key: str, output_path: str):
+    subprocess.run([
+        "ffmpeg",
+        "-allowed_extensions", "ALL",
+        "-protocol_whitelist", "file,http,https,tcp,tls",
+        "-i", input_url,
+        "-decryption_key", key,
+        "-c", "copy",
+        output_path
+    ], check=True)
 
-@bot.on_message(filters.command(["graphy"]))  
-async def graphy_handler(bot: Client, m: Message):  
-    user_id = m.from_user.id if m.from_user else None  
-    if user_id not in auth_users and user_id not in sudo_users:  
-        return await m.reply("**You Are Not Subscribed To This Bot\nContact - @VictoryAnthem**", quote=True)  
+@bot.on_message(filters.command(["graphy"]))
+async def graphy_handler(bot: Client, m: Message):
+    user_id = m.from_user.id if m.from_user else None
+    if user_id not in auth_users and user_id not in sudo_users:
+        return await m.reply("**You Are Not Subscribed To This Bot\nContact - @VictoryAnthem**", quote=True)
 
-    msg = await m.reply("**Send your .txt file: (Title) (video):<m3u8_url>HLS_KEY=<key>**")  
-    input_msg: Message = await bot.listen(m.chat.id)  
-    if not input_msg.document or not input_msg.document.file_name.endswith(".txt"):  
-        return await msg.edit("❌ Please send a valid .txt file.")  
-    txt_path = await input_msg.download()  
-    await msg.edit("Processing...⏳")  
+    # 1) Get the .txt file
+    msg = await m.reply("📄 Please send the .txt file with lines like:\n\n  (Title) (video):<m3u8_url>HLS_KEY=<hex_key>")
+    input_msg = await bot.listen(m.chat.id)
+    if not input_msg.document or not input_msg.document.file_name.endswith(".txt"):
+        return await msg.edit("❌ That’s not a valid .txt file.")
+    txt_path = await input_msg.download()
+    await msg.edit("✅ File received.")
 
-    with open(txt_path, "r", encoding="utf-8") as f:  
-        lines = [l.strip() for l in f if ":" in l]  
+    # 2) Ask where to start
+    ask = await m.reply("▶️ From which line number should I start? (1 means the first entry)")
+    num_msg = await bot.listen(m.chat.id)
+    try:
+        start_idx = max(1, int(num_msg.text))
+    except:
+        start_idx = 1
+    await ask.delete()
 
-    for idx, line in enumerate(lines, start=1):  
-        try:  
-            title_part, rest = line.split(":",1)  
-            title = title_part.strip("() ")  
-            if "HLS_KEY=" not in rest: raise ValueError("Missing HLS_KEY")  
-            url_str, key_hex = rest.split("HLS_KEY=",1)  
-            m3u8_url = url_str.strip()  
-            key = key_hex.strip()  
-            safe = re.sub(r'[<>:\"/\\\\|?*]','_', f"{idx:03d}) {title}")  
-            os.makedirs("downloads", exist_ok=True)  
-            outp = os.path.join("downloads", f"{safe}.mp4")  
-            if os.path.exists(outp):  
-                await m.reply(f"⏭️ Skipped {safe} (exists)")  
-                continue  
-            await m.reply(f"▶ Downloading {safe}")  
-            await asyncio.get_event_loop().run_in_executor(None, run_ffmpeg_decrypt, m3u8_url, key, outp)  
-            await bot.send_document(m.chat.id, outp, caption=safe)  
-        except Exception as e:  
-            await m.reply(f"❌ Failed {idx}: {e}")  
-            continue  
+    # 3) Read and process
+    with open(txt_path, "r", encoding="utf-8") as f:
+        lines = [l.strip() for l in f if ":" in l]
+    os.remove(txt_path)
 
-    await msg.edit("🔰All done!🔰")  
+    total = len(lines)
+    await m.reply(f"🔢 Processing {total - start_idx + 1} entries starting from line {start_idx}...")
+
+    for i, line in enumerate(lines[start_idx-1:], start=start_idx):
+        try:
+            # parse
+            title_part, rest = line.split(":", 1)
+            title = title_part.strip("() ").strip()
+            if "HLS_KEY=" not in rest:
+                raise ValueError("Missing HLS_KEY")
+            url_str, key_hex = rest.split("HLS_KEY=", 1)
+            m3u8_url = url_str.strip()
+            key = key_hex.strip()
+
+            # prepare output
+            safe = re.sub(r'[<>:"/\\|?*]', "_", f"{i:03d}) {title}")
+            os.makedirs("downloads", exist_ok=True)
+            outp = os.path.abspath(os.path.join("downloads", f"{safe}.mp4"))
+
+            if os.path.exists(outp):
+                await m.reply(f"⏭️ Skipping {safe} (already exists)")
+                continue
+
+            # decrypt
+            await m.reply(f"▶️ Downloading & decrypting {safe}...")
+            await asyncio.get_event_loop().run_in_executor(
+                None, run_ffmpeg_decrypt, m3u8_url, key, outp
+            )
+
+            # send and cleanup
+            await bot.send_document(
+                chat_id=m.chat.id,
+                document=outp,
+                caption=safe
+            )
+            os.remove(outp)
+
+        except Exception as e:
+            await m.reply(f"❌ Failed line {i}: {e}")
+            continue
+
+    await m.reply("✅ All done!")  
 
 bot.run()  

@@ -18,7 +18,8 @@ import time
 import asyncio  
 from pyrogram.types import User, Message  
 from config import api_id, api_hash, bot_token, auth_users, sudo_users  
-import os  
+import os 
+import uuid
 import re  
 
 bot = Client(

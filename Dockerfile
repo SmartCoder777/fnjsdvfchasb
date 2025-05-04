@@ -18,6 +18,16 @@ RUN pip install --upgrade pip \
        aria2 \
        curl \
        unzip \
+       libatk1.0-0 \
+       libatk-bridge2.0-0 \
+       libcups2 \
+       libatspi2.0-0 \
+       libxcomposite1 \
+       libxdamage1 \
+       libxrandr2 \
+       libxss1 \
+       libgbm1 \
+       libasound2 \
     && pip install -r requirements.txt \
     && playwright install chromium \
     && rm -rf /var/lib/apt/lists/*

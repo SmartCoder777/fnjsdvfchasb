@@ -20,16 +20,17 @@ bot = Client(
     "bot",
     api_id=29754529,
     api_hash="dd54732e78650479ac4fb0e173fe4759",
-    bot_token="7719885018:AAEHHG6-cby4xjYb2t71_vb8Rt5zInTKvNM"
+    bot_token="7892640909:AAEGpCR3UOx4kBIkHGv7RE2VmkQFr39t5Vw"
 )
 
-# -- Added function for tokenized vidrize links (with cid header) --
+# -- Updated function: no format flag for tokenized links --
 async def download_tokenized_video(url: str, output_name: str, user_agent: str = None) -> str:
     """
     Download a tokenized non-DRM video URL using yt-dlp by extracting:
       - `curl` as Referer header
       - `tkn` as Authorization Bearer token
       - `cid` as custom header
+    Does not pass any -f flag so yt-dlp picks best available automatically.
     """
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
@@ -44,7 +45,6 @@ async def download_tokenized_video(url: str, output_name: str, user_agent: str =
             'Chrome/113.0.0.0 Safari/537.36'
         )
 
-    # assemble headers for yt-dlp
     headers = [
         '--add-header', f"Referer: {referer}",
         '--add-header', f"User-Agent: {user_agent}",
@@ -54,9 +54,9 @@ async def download_tokenized_video(url: str, output_name: str, user_agent: str =
     if cid:
         headers += ['--add-header', f"cid: {cid}"]
 
+    # no '-f' provided
     cmd = [
         'yt-dlp',
-        '-f', 'best',
         url,
         '-o', f"{output_name}.mp4",
     ] + headers
@@ -65,7 +65,67 @@ async def download_tokenized_video(url: str, output_name: str, user_agent: str =
     if result.returncode != 0:
         raise RuntimeError(f"yt-dlp failed: {result.stderr}")
     return f"{output_name}.mp4"
-# -- End addition --
+# -- End update --
+
+# -- New /token command handler: simplified flow for tokenized links --
+@bot.on_message(filters.command(["token"]))
+async def token_download(bot: Client, m: Message):
+    user_id = m.from_user.id if m.from_user else None
+    if user_id not in auth_users and user_id not in sudo_users:
+        await m.reply("**You Are Not Subscribed To This Bot\nContact - @VictoryAnthem**", quote=True)
+        return
+
+    prompt = await m.reply_text("**Send text file or paste links (one per line) for tokenized downloads**")
+    inp: Message = await bot.listen(prompt.chat.id)
+    if inp.document:
+        path = await inp.download()
+        with open(path) as f:
+            lines = f.read().splitlines()
+        os.remove(path)
+    else:
+        lines = inp.text.splitlines()
+    await prompt.delete(True)
+
+    links = [line.split('://',1)[1] if '://' in line else line for line in lines]
+    ask = await m.reply_text(f"Total links: **{len(links)}**\nSend starting line number (default 1)")
+    resp: Message = await bot.listen(ask.chat.id)
+    while resp.text.startswith('/') or not resp.text.isdigit():
+        await resp.delete(True)
+        resp = await bot.listen(ask.chat.id)
+    start = int(resp.text); await resp.delete(True)
+
+    ask2 = await m.reply_text("**Enter Batch Name or send `d` for default**")
+    resp2: Message = await bot.listen(ask2.chat.id)
+    while resp2.text.startswith('/'):
+        await resp2.delete(True)
+        resp2 = await bot.listen(ask2.chat.id)
+    batch = None if resp2.text == 'd' else resp2.text
+    await resp2.delete(True)
+
+    ask3 = await m.reply_text("**Enter 'de' to use your name or type custom 'Downloaded by'**")
+    resp3: Message = await bot.listen(ask3.chat.id)
+    while resp3.text.startswith('/'):
+        await resp3.delete(True)
+        resp3 = await bot.listen(ask3.chat.id)
+    downloader = resp3.text if resp3.text != 'de' else f"[{m.from_user.first_name}](tg://user?id={m.from_user.id})"
+    await resp3.delete(True)
+
+    count = start
+    for raw in links[start-1:]:
+        url = 'https://' + raw
+        name_base = re.sub(r"[^\w\-]", "", raw)[:60]
+        out = f"{str(count).zfill(3)}) {name_base}"
+        try:
+            file_path = await download_tokenized_video(url, out)
+            caption = f"**{count}.** {name_base}\n**Batch:** {batch or name_base}\n**By:** {downloader}"
+            await bot.send_document(chat_id=m.chat.id, document=file_path, caption=caption)
+            os.remove(file_path)
+            count += 1
+        except Exception as e:
+            await m.reply_text(f"Failed to download tokenized link {url}: {e}")
+            count += 1
+    await m.reply_text("🔰 Token downloads completed 🔰")
+# -- End /token handler --
 
 async def cancel_command(bot: Client, m: Message):
     user_id = m.from_user.id if m.from_user else None
@@ -169,15 +229,12 @@ async def account_login(bot: Client, m: Message):
 
         # existing handlers
         if "visionias" in url:
-            # ... unchanged visionias logic ...
             async with ClientSession() as session:
                 async with session.get(url, headers={
                     'Referer':'http://www.visionias.in/', 'User-Agent': 'Mozilla/5.0'
                 }) as resp:
                     text = await resp.text()
                     url = re.search(r"(https://.*?playlist.m3u8.*?)\"", text).group(1)
-
-        # other domain-specific branches omitted for brevity
 
         # yt-dlp download fallback
         fmt = f"b[height<={req_res}]+ba" if "youtu" not in url else f"b[height<={req_res}][ext=mp4]+ba[ext=m4a]"

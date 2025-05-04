@@ -24,9 +24,9 @@ from playwright.sync_api import sync_playwright
 
 bot = Client(
     "bot",
-    api_id=api_id,
-    api_hash=api_hash,
-    bot_token=bot_token
+    api_id=29754529,
+    api_hash="dd54732e78650479ac4fb0e173fe4759",
+    bot_token="7719885018:AAEHHG6-cby4xjYb2t71_vb8Rt5zInTKvNM"
 )
 
 @bot.on_message(filters.command(["stop"]))

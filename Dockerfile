@@ -1,39 +1,12 @@
+
 FROM python:3.10.14-bookworm
-
-# Copy requirements and install
-COPY requirements.txt /app/requirements.txt
-WORKDIR /app
-RUN pip install --upgrade pip \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-       poppler-utils \
-       git \
-       wget \
-       pv \
-       jq \
-       python3-dev \
-       ffmpeg \
-       mediainfo \
-       libssl-dev \
-       aria2 \
-       curl \
-       unzip \
-       libatk1.0-0 \
-       libatk-bridge2.0-0 \
-       libcups2 \
-       libatspi2.0-0 \
-       libxcomposite1 \
-       libxdamage1 \
-       libxrandr2 \
-       libxss1 \
-       libgbm1 \
-       libasound2 \
-    && pip install -r requirements.txt \
-    && playwright install chromium \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy application code
-COPY . /app
-
-# Entry point: start Flask and bot
+COPY requirements.txt requirements.txt
+RUN pip install --upgrade pip
+RUN apt-get update && apt-get install -y poppler-utils
+RUN apt -qq update && apt -qq install -y git wget pv jq python3-dev ffmpeg mediainfo
+RUN pip3 install -r requirements.txt
+RUN apt-get install ffmpeg
+RUN apt-get update
+RUN apt-get install -y libssl-dev aria2 ffmpeg curl unzip
+COPY . .
 CMD gunicorn app:app & python3 main.py

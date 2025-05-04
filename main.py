@@ -249,43 +249,68 @@ async def account_login(bot: Client, m: Message):
         await m.reply_text(e)
     await m.reply_text("🔰Done Boss🔰")
 
-# New /token command
 @bot.on_message(filters.command(["token"]))
 async def single_token(bot: Client, m: Message):
     user_id = m.from_user.id if m.from_user else None
     if user_id not in auth_users and user_id not in sudo_users:
         return await m.reply("**You Are Not Subscribed To This Bot\nContact - @VictoryAnthem**", quote=True)
 
-    payload = m.text.partition(' ')[2]
-    lines = payload.splitlines()
-    if len(lines) != 2:
-        return await m.reply("**Usage:**\n/token <Name>\n<URL>", quote=True)
+    # Request and download the .txt file
+    editable = await m.reply_text("**Please send the .txt file**")
+    input: Message = await bot.listen(editable.chat.id)
+    if not input.document:
+        return await m.reply_text("❌ Please send a valid .txt file.")
 
-    name_raw, url = lines
-    name_clean = re.sub(r"[\t:/\\+#\|@\*\.]+", "", name_raw).strip()[:60]
-    title = f"001) {name_clean}"
+    file_path = await input.download()
+    if not file_path.endswith(".txt"):
+        os.remove(file_path)
+        return await m.reply_text("❌ Only .txt files are supported.")
 
-    fmt = (
-        "b[height<=720][ext=mp4]/bv[height<=720][ext=mp4]+ba[ext=m4a]/b[ext=mp4]"
-        if "youtu" in url
-        else "b[height<=720]/bv[height<=720]+ba/b/bv+ba"
-    )
-    cmd = f'yt-dlp -f "{fmt}" "{url}" -o "{title}.mp4"'
+    await editable.edit("Processing the file...")
 
+    def sanitize_filename(name):
+        return re.sub(r'[<>:"/\\|?*]', '_', name).strip()
+
+    def download_video(title, m3u8_url):
+        safe_title = sanitize_filename(title)
+        output_path = os.path.join("./downloads", f"{safe_title}.%(ext)s")
+
+        command = [
+            "yt-dlp",
+            m3u8_url,
+            "--downloader", "aria2c",
+            "--downloader-args", "aria2c:-x 32 -s 32 -k 1M",
+            "--ffmpeg-location", "ffmpeg",
+            "--add-header", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "--add-header", "Referer: https://web.vijethaiasacademy.com",
+            "-o", output_path,
+            "--no-part",
+            "--merge-output-format", "mp4"
+        ]
+
+        try:
+            subprocess.run(command, check=True)
+            return f"✅ Done: {safe_title}.mp4\n"
+        except subprocess.CalledProcessError as e:
+            return f"❌ Failed: {title} — {e}\n"
+
+    # Read and process the .txt file
     try:
-        prog = await m.reply_text(f"**Downloading:** `{title}`\nURL: `{url}`")
-        res_file = await helper.download_video(url, cmd, title)
-        await prog.delete(True)
-
-        credit_txt = f"[{m.from_user.first_name}](tg://user?id={m.from_user.id})"
-        caption = f"**1.** {name_clean}\n\n**Downloaded by : {credit_txt}**"
-        await helper.send_vid(bot, m, caption, res_file, thumb=None, name=title)
-
-        os.remove(res_file)
-    except FloodWait as e:
-        await m.reply_text(f"Flood wait: {e.x} seconds")
-        time.sleep(e.x)
+        with open(file_path, 'r', encoding='utf-8') as f:
+            results = []
+            for line in f:
+                if ':' not in line:
+                    continue
+                title, url = line.strip().split(':', 1)
+                title, url = title.strip(), url.strip()
+                if url.startswith("http"):
+                    result = download_video(title, url)
+                    results.append(result)
+        
+        await m.reply_text("".join(results) if results else "No valid entries found in the file.")
     except Exception as e:
-        await m.reply_text(f"❌ Download failed: {e}")
+        await m.reply_text(f"Error processing the file: {e}")
+    finally:
+        os.remove(file_path)  # Clean up the downloaded file
 
 bot.run()

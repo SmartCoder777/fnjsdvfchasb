@@ -279,7 +279,7 @@ async def single_token(bot: Client, m: Message):
             "yt-dlp",
             m3u8_url,
             "--downloader", "aria2c",
-            "--downloader-args", "aria2c:-x 32 -s 32 -k 1M",
+            "--downloader-args", "aria2c:-x 16 -s 16 -k 1M",
             "--ffmpeg-location", "ffmpeg",
             "--add-header", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
             "--add-header", "Referer: https://web.vijethaiasacademy.com",
